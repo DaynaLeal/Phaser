@@ -1,6 +1,6 @@
-<!doctype html> 
-<html lang="en"> 
-<head> 
+<!doctype html>
+<html lang="en">
+<head>
     <meta charset="UTF-8" />
     <title>Making your first Phaser 3 Game - Part 1</title>
     <script src="//cdn.jsdelivr.net/npm/phaser@3.11.0/dist/phaser.js"></script>
@@ -18,6 +18,14 @@
         type: Phaser.AUTO,
         width: 800,
         height: 600,
+        // below is so we can call the physics arcade with this.physics in the create function
+        physics: {
+            default: 'arcade',
+            arcade: {
+                gravity: { y: 300 },
+                debug: false
+            }
+        },
         scene: {
             preload: preload,
             create: create,
@@ -27,17 +35,181 @@
 
     var game = new Phaser.Game(config);
 
+    //this holds score
+    var score = 0;
+    //this is the actual text for the score
+    var scoreText;
+
     function preload ()
     {
+        this.load.image('sky', 'assets/sky.png');
+        this.load.image('ground', 'assets/platform.png');
+        this.load.image('star', 'assets/star.png');
+        this.load.image('bomb', 'assets/bomb.png');
+        this.load.spritesheet('dude',
+            'assets/dude.png',
+            { frameWidth: 32, frameHeight: 48 }
+        );
     }
 
     function create ()
     {
+        this.add.image(400, 300, 'sky');
+
+        //below create the non-moving/static platforms
+        platforms = this.physics.add.staticGroup();
+        platforms.create(400, 568, 'ground').setScale(2).refreshBody();
+        platforms.create(600, 400, 'ground');
+        platforms.create(50, 250, 'ground');
+        platforms.create(750, 220, 'ground');
+
+        //these add the sprite with basic properties
+        player = this.physics.add.sprite(100, 450, 'dude');
+        player.setBounce(0.2);
+        player.setCollideWorldBounds(true);
+
+        //the following 3 functions use the sprite sheet images to show the left, right, and forward(to turn)
+        this.anims.create({
+            key: 'left',
+            frames: this.anims.generateFrameNumbers('dude', { start: 0, end: 3 }),
+            frameRate: 10,
+            repeat: -1
+        });
+
+        this.anims.create({
+            key: 'turn',
+            frames: [ { key: 'dude', frame: 4 } ],
+            frameRate: 20
+        });
+
+        this.anims.create({
+            key: 'right',
+            frames: this.anims.generateFrameNumbers('dude', { start: 5, end: 8 }),
+            frameRate: 10,
+            repeat: -1
+        });
+
+        //this keeps the player and the platforms from colliding, now the player can stand on and has to move around platforms
+        this.physics.add.collider(player, platforms);
+
+        //this calls on phaser functions to allow event listeners for up, down, left and right arrow keys
+        cursors = this.input.keyboard.createCursorKeys();
+
+        //this creates the star group
+        stars = this.physics.add.group({
+            key: 'star',
+            //creates an additional 11 starts (total of 12)
+            repeat: 11,
+            //puts 70px of space on the x axis between each of the stars (with the first at 12, 0)
+            setXY: { x: 12, y: 0, stepX: 70 }
+        });
+
+        //this iterates between all stars in the star group
+        stars.children.iterate(function (child) {
+
+            //this allows them all to bounce between 40% and 80% bounce after falling due to gravity
+            child.setBounceY(Phaser.Math.FloatBetween(0.4, 0.8));
+
+        });
+
+        //this collider stops the stars from falling through the platforms and out of screen
+        this.physics.add.collider(stars, platforms);
+
+        // if player collides with star, the player collects the star
+        this.physics.add.overlap(player, stars, collectStar, null, this);
+
+        //this sets up the score on the screen
+        //16x16 is the axis spot for the score
+        scoreText = this.add.text(16, 16, 'score: 0', { fontSize: '32px', fill: '#000' });
+
+        //creates the bomb group
+        bombs = this.physics.add.group();
+        //the following are colliders and call hitBomb function
+        this.physics.add.collider(bombs, platforms);
+        this.physics.add.collider(player, bombs, hitBomb, null, this);
     }
 
     function update ()
     {
+        //these are the keyboard calls for left and right movement
+        if (cursors.left.isDown)
+        {
+            //left velocity is negative
+            player.setVelocityX(-160);
+            //this calls the left function with sprite sheets
+            player.anims.play('left', true);
+        }
+        else if (cursors.right.isDown)
+        {
+            //left velocity is positive
+            player.setVelocityX(160);
+            //this calls the right function with sprite sheets
+            player.anims.play('right', true);
+        }
+        else
+        {
+            //this stops player
+            player.setVelocityX(0);
+            //shows the turn sprite
+            player.anims.play('turn');
+        }
+
+        //this is for jumping, if we took off the player.body.touching.down part, we would be able to jump in mid air
+        if (cursors.up.isDown && player.body.touching.down)
+        {
+            //negative moves the sprite up to jump
+            //smaller negative numbers make small jumps, larger negatives make huge jumps
+            player.setVelocityY(-350);
+        }
     }
+
+
+
+    //this function is called when player collides with a star (in create)
+    function collectStar (player, star)
+    {
+        //this disables the star object and makes invisible on screen
+        star.disableBody(true, true);
+
+        //this adds to the score and reflects this in the screen
+        score += 10;
+        scoreText.setText('Score: ' + score);
+
+        //if all the stars are collected
+        if (stars.countActive(true) === 0)
+        {
+            //this re-enables all the stars by iterating over them and enabling
+            stars.children.iterate(function (child) {
+
+                child.enableBody(true, child.x, 0, true, true);
+
+            });
+
+            //this is an if statement(essentially) that determines where on the x axis the bomb will be released, on the opposite end of the player
+            var x = (player.x < 400) ? Phaser.Math.Between(400, 800) : Phaser.Math.Between(0, 400);
+
+            //this creates the bomb, uses the x axis point determined above, creates world bounds and gives a random velocity within range
+            var bomb = bombs.create(x, 16, 'bomb');
+            bomb.setBounce(1);
+            bomb.setCollideWorldBounds(true);
+            bomb.setVelocity(Phaser.Math.Between(-200, 200), 20);
+
+        }
+    }
+
+    //this function is called when player collides with a bomb
+    function hitBomb (player, bomb)
+    {
+        //stops player movement
+        this.physics.pause();
+        //this turns him a red color
+        player.setTint(0xff0000);
+        //this makes him face forward
+        player.anims.play('turn');
+        //this ends the game
+        gameOver = true;
+    }
+
 
 </script>
 
